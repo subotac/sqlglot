@@ -13,6 +13,27 @@ class TestSnowflake(Validator):
     maxDiff = None
     dialect = "snowflake"
 
+    def test_time_format_case_insensitive(self):
+        for fmt, expected in (
+            ("Mon", "%b"),
+            ("Dy", "%a"),
+            ("Mmmm", "%B"),
+            ("dy", "%a"),
+            ("dd", "%d"),
+            ("dD Mon yYyY", "%d %b %Y"),
+        ):
+            with self.subTest(fmt=fmt):
+                self.validate_all(
+                    f"TO_CHAR(CAST('2024-05-09' AS DATE), '{fmt}')",
+                    write={
+                        "duckdb": f"STRFTIME(CAST('2024-05-09' AS DATE), '{expected}')",
+                    },
+                )
+
+    def test_time_format_case_preserves_literal_text(self):
+        expression = self.parse_one("TO_CHAR(CAST(x AS DATE), 'Mon \"MiXeD\"')")
+        self.assertEqual(expression.args["format"].this, '%b "MiXeD"')
+
     def test_set_operation_top(self):
         for op in ("UNION", "UNION ALL", "INTERSECT", "EXCEPT"):
             with self.subTest(op=op):
@@ -4632,7 +4653,8 @@ class TestSnowflake(Validator):
             "DROP FUNCTION my_udf (OBJECT(city VARCHAR, zipcode DECIMAL(38, 0), val ARRAY(BOOLEAN)))"
         )
         self.validate_identity(
-            "CREATE TABLE orders_clone_restore CLONE orders AT (TIMESTAMP => TO_TIMESTAMP_TZ('04/05/2013 01:02:03', 'mm/dd/yyyy hh24:mi:ss'))"
+            "CREATE TABLE orders_clone_restore CLONE orders AT (TIMESTAMP => TO_TIMESTAMP_TZ('04/05/2013 01:02:03', 'mm/dd/yyyy hh24:mi:ss'))",
+            "CREATE TABLE orders_clone_restore CLONE orders AT (TIMESTAMP => TO_TIMESTAMP_TZ('04/05/2013 01:02:03', 'mm/DD/yyyy hh24:mi:ss'))",
         )
         self.validate_identity(
             "CREATE TABLE orders_clone_restore CLONE orders BEFORE (STATEMENT => '8e5d0ca9-005e-44e6-b858-a8f5b37c5726')"

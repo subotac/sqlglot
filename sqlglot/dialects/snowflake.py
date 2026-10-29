@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from functools import cache
+
 from sqlglot import exp, jsonpath, tokens
 from sqlglot.dialects.dialect import (
     Dialect,
@@ -47,6 +50,10 @@ class Snowflake(Dialect):
     INITCAP_DEFAULT_DELIMITER_CHARS = ' \t\n\r\f\v!?@"^#$&~_,.:;+\\-*%/|\\[\\](){}<>'
 
     INVERSE_TIME_MAPPING = {
+        "%d": "DD",
+        "%-d": "dd",
+        "%a": "DY",
+        "%w": "dy",
         "T": "T",  # in TIME_MAPPING we map '"T"' with the double quotes to 'T', and we want to prevent 'T' from being mapped back to '"T"' so that 'AUTO' doesn't become 'AU"T"O'
     }
 
@@ -62,9 +69,9 @@ class Snowflake(Dialect):
         "MM": "%m",
         "mm": "%m",
         "DD": "%d",
-        "dd": "%-d",
+        "dd": "%d",
         "DY": "%a",
-        "dy": "%w",
+        "dy": "%a",
         "HH24": "%H",
         "hh24": "%H",
         "HH12": "%I",
@@ -125,6 +132,37 @@ class Snowflake(Dialect):
     }
 
     PSEUDOCOLUMNS = {"LEVEL"}
+
+    @classmethod
+    @cache
+    def _time_format_mapping(cls) -> tuple[dict[str, str], re.Pattern[str]]:
+        mapping = {key.upper(): value for key, value in cls.TIME_MAPPING.items()}
+        pattern = re.compile(
+            r'"[^"]*"|'
+            + "|".join(re.escape(key) for key in sorted(mapping, key=len, reverse=True)),
+            re.IGNORECASE | re.ASCII,
+        )
+        return mapping, pattern
+
+    @classmethod
+    def format_time(cls, expression: str | exp.Expr | None) -> exp.Expr | None:
+        if isinstance(expression, str):
+            expression = exp.Literal.string(expression[1:-1])
+
+        if expression and expression.is_string:
+            mapping, pattern = cls._time_format_mapping()
+            return exp.Literal.string(
+                pattern.sub(
+                    lambda match: (
+                        cls.TIME_MAPPING.get(match[0], match[0])
+                        if match[0].startswith('"')
+                        else mapping[match[0].upper()]
+                    ),
+                    expression.this,
+                )
+            )
+
+        return expression
 
     def can_quote(self, identifier: exp.Identifier, identify: str | bool = "safe") -> bool:
         # This disables quoting DUAL in SELECT ... FROM DUAL, because Snowflake treats an
